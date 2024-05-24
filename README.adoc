@@ -1,0 +1,3 @@
+= README
+
+This repository is a collection of small C# projects for testing and developing.
