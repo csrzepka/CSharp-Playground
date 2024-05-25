@@ -1,0 +1,111 @@
+= ConsoleColorPicker
+
+This project was created as an experiment of colors with C# (windows) console apps, in response to working on _The Color_ challenge from _The C# Players Guide_.
+
+The challenge was simply asking to create an RGB Color class to represent color in a C# console application. But this led me to think "What if I could make an actual RGB color picker, that updates the color in realtime?"
+
+I already knew that the .NET `System.Console` class had limitations to the colors you could set for the Foreground and Background console colors, limited to just 16 colors for both, but I wanted to see if I could find a way to expand beyond that limitation.
+
+== The `System.Console` Class
+
+I started poking around the `System.Console` class to see how it works. I wanted to know:
+
+- How does the `System.Console` class actually change the console colors?
+- How are colors represented in the console?
+- How could I modify the console class and/or create functions to directly interact with the console?
+
+To find this information, I started exploring the https://github.com/dotnet/runtime[dotNET runtime repository] to explore the source code for the `Console` class.
+
+=== How does the `System.Console` class actually change the console colors?
+
+Exploring the `Console` class source code showed what the get/set functions of the `ForegroundColor` and `BackgroundColor` properties do:
+
+[source, csharp]
+----
+// src/libraries/System.Console/src/System/Console.cs
+
+namespace System
+{
+    public static class Console
+    {
+        // ...
+
+        [UnsupportedOSPlatform("android")]
+        [UnsupportedOSPlatform("browser")]
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("tvos")]
+        public static ConsoleColor BackgroundColor
+        {
+            get { return ConsolePal.BackgroundColor; }
+            set { ConsolePal.BackgroundColor = value; }
+        }
+
+        [UnsupportedOSPlatform("android")]
+        [UnsupportedOSPlatform("browser")]
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("tvos")]
+        public static ConsoleColor ForegroundColor
+        {
+            get { return ConsolePal.ForegroundColor; }
+            set { ConsolePal.ForegroundColor = value; }
+        }
+
+        // ...
+    }
+}
+----
+
+So the next obvious step is to explore the `ConsolePal` class.
+
+There are several `ConsolePal` classes, which have different files for different operating systems, like `ConsolePal.Windows.cs`. This makes sense - different operating systems will have different native APIs with interacting with their consoles, so each operating system will need its own unique logic to work with these APIs, and the correct OS `ConsolePal` class is selected in the project's `.csproj` file.
+
+NOTE: The `BackgroundColor` and `ForegroundColor` have attributes that indicate what operating systems do no support the function. This was interesting to see because I assumed that the Console class supplied a universal system for creating console apps for different operating systems, but there are still some that have limited features (but the ones listed are probably not any I would ever build console UIs for).
+
+[source, csharp]
+----
+// src/libraries/System.Console/src/System/ConsolePal.Windows.cs
+
+namespace System
+{
+    internal static class ConsolePal
+    {
+        // ...
+
+        public static ConsoleColor BackgroundColor
+        {
+            get
+            {
+                bool succeeded;
+                Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO csbi = GetBufferInfo(false, out succeeded);
+                return succeeded ?
+                    ColorAttributeToConsoleColor((Interop.Kernel32.Color)csbi.wAttributes & Interop.Kernel32.Color.BackgroundMask) : 
+                    ConsoleColor.Black; // for code that may be used from Windows app w/ no console
+            }
+            set
+            {
+                Interop.Kernel32.Color c = ConsoleColorToColorAttribute(value, true);
+
+                bool succeeded;
+                Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO csbi = GetBufferInfo(false, out succeeded);
+                // For code that may be used from Windows app w/ no console
+                if (!succeeded)
+                    return;
+
+                Debug.Assert(_haveReadDefaultColors, "Setting the backgorund color before we've read the default foreground color!");
+
+                short attrs = csbi.wAttributes;
+                attrs &= ~((short)Interop.Kernel32.Color.BackgroundMask);
+                // C#'s bitwise-or sign-extends to 32 bits.
+                attrs = (short)(((uint)(ushort)attrs) | ((uint)(ushort)c));
+                // Ignore errors here - there are some scenarios for running code that wants
+                // to print in colors to the console in a Windows application.
+                Interop.Kernel32.SetConsoleTextAttribute(OutputHandle, attrs);
+            }
+        }
+
+        // ...
+    }
+}
+----
+
+Looking at the `ConsolePal` class shows a lot of interesting things! 
