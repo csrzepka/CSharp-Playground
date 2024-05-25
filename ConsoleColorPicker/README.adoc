@@ -20,10 +20,9 @@ To find this information, I started exploring the https://github.com/dotnet/runt
 
 Exploring the `Console` class source code showed what the get/set functions of the `ForegroundColor` and `BackgroundColor` properties do:
 
+https://github.com/dotnet/runtime/blob/main/src/libraries/System.Console/src/System/Console.cs[src/libraries/System.Console/src/System/Console.cs]
 [source, csharp]
 ----
-// src/libraries/System.Console/src/System/Console.cs
-
 namespace System
 {
     public static class Console
@@ -59,12 +58,11 @@ So the next obvious step is to explore the `ConsolePal` class.
 
 There are several `ConsolePal` classes, which have different files for different operating systems, like `ConsolePal.Windows.cs`. This makes sense - different operating systems will have different native APIs with interacting with their consoles, so each operating system will need its own unique logic to work with these APIs, and the correct OS `ConsolePal` class is selected in the project's `.csproj` file.
 
-NOTE: The `BackgroundColor` and `ForegroundColor` have attributes that indicate what operating systems do no support the function. This was interesting to see because I assumed that the Console class supplied a universal system for creating console apps for different operating systems, but there are still some that have limited features (but the ones listed are probably not any I would ever build console UIs for).
+NOTE: The `BackgroundColor` and `ForegroundColor` have attributes that indicate what operating systems do not support the function. This was interesting to see because I assumed that the Console class supplied a universal system for creating console apps for different operating systems, but there are still some that have limited features (but the ones listed are probably not any I would ever build console UIs for).
 
+https://github.com/dotnet/runtime/blob/main/src/libraries/System.Console/src/System/ConsolePal.Windows.cs[src/libraries/System.Console/src/System/ConsolePal.Windows.cs]
 [source, csharp]
 ----
-// src/libraries/System.Console/src/System/ConsolePal.Windows.cs
-
 namespace System
 {
     internal static class ConsolePal
@@ -108,4 +106,127 @@ namespace System
 }
 ----
 
-Looking at the `ConsolePal` class shows a lot of interesting things! 
+Looking at the `ConsolePal` class shows a lot of interesting things! Let's find what the `Interop.Kernel32` functions and types are:
+
+https://github.com/dotnet/runtime/blob/main/src/libraries/Common/src/Interop/Windows/Kernel32/Interop.ConsoleScreenBufferInfo.cs[src/libraries/Common/src/Interop/Windows/Kernel32/Interop.ConsoleScreenBufferInfo.cs]
+[source, csharp]
+----
+using System.Runtime.InteropServices;
+
+internal static partial class Interop
+{
+    internal static partial class Kernel32
+    {
+        [StructLayoutAttribute(LayoutKind.Sequential)]
+        internal struct CONSOLE_SCREEN_BUFFER_INFO
+        {
+            internal COORD dwSize;
+            internal COORD dwCursorPosition;
+            internal short wAttributes;
+            internal SMALL_RECT srWindow;
+            internal COORD dwMaximumWindowSize;
+        }
+
+        [StructLayoutAttribute(LayoutKind.Sequential)]
+        internal partial struct COORD
+        {
+            internal short X;
+            internal short Y;
+        }
+
+        [StructLayoutAttribute(LayoutKind.Sequential)]
+        internal partial struct SMALL_RECT
+        {
+            internal short Left;
+            internal short Top;
+            internal short Right;
+            internal short Bottom;
+        }
+
+        internal enum Color : short
+        {
+            Black = 0,
+            ForegroundBlue = 0x1,
+            ForegroundGreen = 0x2,
+            ForegroundRed = 0x4,
+            ForegroundYellow = 0x6,
+            ForegroundIntensity = 0x8,
+            BackgroundBlue = 0x10,
+            BackgroundGreen = 0x20,
+            BackgroundRed = 0x40,
+            BackgroundYellow = 0x60,
+            BackgroundIntensity = 0x80,
+
+            ForegroundMask = 0xf,
+            BackgroundMask = 0xf0,
+            ColorMask = 0xff
+        }
+    }
+}
+----
+
+https://github.com/dotnet/runtime/blob/main/src/libraries/Common/src/Interop/Windows/Kernel32/Interop.SetConsoleTextAttribute.cs[src/libraries/Common/src/Interop/Windows/Kernel32/Interop.SetConsoleTextArributes.cs]
+[source, csharp]
+----
+using System;
+using System.Runtime.InteropServices;
+
+internal static partial class Interop
+{
+    internal static partial class Kernel32
+    {
+        [LibraryImport(Libraries.Kernel32, SetLastError = true)]
+        internal static partial int SetConsoleTextAttribute(IntPtr hConsoleOutput, short wAttributes);
+    }
+}
+----
+
+Look at all of this, what does it mean? Using `set` on `ConsolePal`'s `BackgroundColor` property converts the set value from `ConsoleColor` to some `Interop.Kernel32.Color` type, then using it to modify some `Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO.wAttributes` type (`short`), and passing that value into a `SetConsoleTextAttribute()` function. This is how the `Console` class is "actually" modifying the console colors on Windows.
+
+=== How are colors represented in the console?
+
+From this, we can see that the console colors are being set inside the `Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO` structs `wAttributes`, based on the `Interop.Kernel32.Color` enum. The enum tells us about how the data is stored; the background and foreground colors are stored together in 1 byte, the first four bits for the foreground, and the last four bits for the background (as can tell from the two mask's). This means that the foreground and background can each be represented as a maximum of 16 colors (max size of 4 bits).
+
+The enum is used to modify the `Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO` structs `wAttributes`, before passing the `wAttributes` into the `SetConsoleTextAttribute()` function, which, through the *Kernel32.dll*, will update the console colours.
+
+That means that only 4 bits represent the foreground colors and only 4 bits represent the background colors in the Windows console. 
+
+=== How could I modify the console class and/or create functions to directly interact with the console?
+
+With the above information, we find that we cannot modify the console class to be able to represent the full colors the color picker would want to show, because we can not represent RGB colors with only 4 bits (we would need 24 bits, 8 for each channel). We will have to explore if other options are available to us to be able to set more colors than this method allows.
+
+It might be useful to learn more about some advanced .NET programming topics like:
+
+- https://learn.microsoft.com/en-us/dotnet/standard/native-interop/[Native interoperability | Learn .NET]
+- https://learn.microsoft.com/en-us/dotnet/standard/native-interop/pinvoke[Platform Invoke (P/Invoke)]
+- https://learn.microsoft.com/en-us/dotnet/standard/native-interop/type-marshalling[Type marshalling]
+
+These topics will help use be able to use the *Kernel32.dll* like above.
+
+== Virtual Terminal Sequences
+
+Does this mean we can't create a full RGB color picker display in Window's console? Maybe not!
+
+The Windows Console has changed over time. The above approach that is used in `System.Console` makes use of the classic *Windows Console API*, defined as a series of C language functional interfaces from `kernel32.dll`. But the *Windows Console API* can be replaced with *virtual terminal sequences*. This article from the Microsoft Learn documentation outlines the difference between the two: https://learn.microsoft.com/en-us/windows/console/classic-vs-vt[Classic Console APIs versus Virtual Terminal Sequences | Learn Windows Console].
+
+[quote]
+By contrast, virtual terminal sequences (in a variety of dialects) drive the command-line environment operations for all other platforms. These sequences are rooted in an ECMA Standard and series of extensions by many vendors tracing back to Digital Equipment Corporation and Tektronix terminals, through to more modern and common software terminals, like xterm. Many extensions exist within the virtual terminal sequence domain and some sequences are more widely supported than others, but it is safe to say that the world has standardized on this as the command language for command-line experiences with a well-known subset being supported by virtually every terminal and command-line client application.
+
+There is a lot of interesting information to go through with *Virtual Terminal Sequences* that I will have to go through more in the future. But for now, one part stands out: https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#screen-colors[Screen Colors - Console Virtual Terminal Sequences | Learn Windows Console].
+
+Screen colors gives us the ability to set the screen colors palette values to any RGB value! Perfect! Exactly what we are looking for to make this color picker.
+
+== Next Steps
+
+Learn more about the Console API to make use of *Virtual Terminal Sequences* in C# to create our color picker.
+
+Useful links:
+
+- https://learn.microsoft.com/en-us/windows/console/console-reference[Console Reference | Learn Windows Console]
+- https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences[Console Virtual Terminal Sequences - Using The Console API | Learn Windows Console]
+- https://learn.microsoft.com/en-us/windows/console/setconsolemode[SetConsoleMode function - API Reference | Learn Windows Console]
+- http://www.pinvoke.net/[PInvoke.net]
+
+Virtual Terminal Sequences are the next console/terminal era at Microsoft. While C# and .NET currently still (mainly) use the classic Windows Console API, parts of the new features may be partially/fully available. There will be some limitations still in place, like what console type in Windows supports virtual terminal sequences. 
+
+This project may be put on hold, as the skills and knowledge in C# required to do this are down the line from now.
