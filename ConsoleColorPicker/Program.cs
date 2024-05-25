@@ -1,10 +1,9 @@
-﻿// https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#extended-colors
-// https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797#rgb-colors
-
+﻿
 // MAIN
 
 Console.CursorVisible = false;
 Console.TreatControlCAsInput = true;
+Console.WriteLine();
 
 ConsoleColorPicker colorPicker = new();
 colorPicker.Render();
@@ -274,7 +273,7 @@ public class Slider
 		string line = "─";
 		string thumb = "│";
 
-		int thumbLocation = Value / Step; // where thumnb should be placed on slider
+		int thumbLocation = Value / Step; // where thumb should be placed on slider
 		int minLocation = Minimum / Step;
 		int maxLocation = Maximum / Step;
 

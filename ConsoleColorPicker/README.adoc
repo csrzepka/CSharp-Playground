@@ -1,12 +1,22 @@
 = ConsoleColorPicker
 
+Using https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences[Console Virtual Terminal Sequences], the project is able to set the console colors to any RGB value, based on the selected values. The project uses keyboard controls and a custom console slider to set the RGB values, and updates the color display on the left hand side of the screen to display the current set RGB value.
+
+image::images/ConsoleColorPicker_WindowsTerminal.gif[]
+
+== Motivation
+
 This project was created as an experiment of colors with C# (windows) console apps, in response to working on _The Color_ challenge from _The C# Players Guide_.
 
 The challenge was simply asking to create an RGB Color class to represent color in a C# console application. But this led me to think "What if I could make an actual RGB color picker, that updates the color in realtime?"
 
 I already knew that the .NET `System.Console` class had limitations to the colors you could set for the Foreground and Background console colors, limited to just 16 colors for both, but I wanted to see if I could find a way to expand beyond that limitation.
 
-== The `System.Console` Class
+== Developer Research
+
+The following includes information on my thought process for this project, including what topics I looked into, and what information I found that was relevant.
+
+=== The `System.Console` Class
 
 I started poking around the `System.Console` class to see how it works. I wanted to know:
 
@@ -16,7 +26,7 @@ I started poking around the `System.Console` class to see how it works. I wanted
 
 To find this information, I started exploring the https://github.com/dotnet/runtime[dotNET runtime repository] to explore the source code for the `Console` class.
 
-=== How does the `System.Console` class actually change the console colors?
+==== How does the `System.Console` class actually change the console colors?
 
 Exploring the `Console` class source code showed what the get/set functions of the `ForegroundColor` and `BackgroundColor` properties do:
 
@@ -183,7 +193,7 @@ internal static partial class Interop
 
 Look at all of this, what does it mean? Using `set` on `ConsolePal`'s `BackgroundColor` property converts the set value from `ConsoleColor` to some `Interop.Kernel32.Color` type, then using it to modify some `Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO.wAttributes` type (`short`), and passing that value into a `SetConsoleTextAttribute()` function. This is how the `Console` class is "actually" modifying the console colors on Windows.
 
-=== How are colors represented in the console?
+==== How are colors represented in the console?
 
 From this, we can see that the console colors are being set inside the `Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO` structs `wAttributes`, based on the `Interop.Kernel32.Color` enum. The enum tells us about how the data is stored; the background and foreground colors are stored together in 1 byte, the first four bits for the foreground, and the last four bits for the background (as can tell from the two mask's). This means that the foreground and background can each be represented as a maximum of 16 colors (max size of 4 bits).
 
@@ -191,7 +201,7 @@ The enum is used to modify the `Interop.Kernel32.CONSOLE_SCREEN_BUFFER_INFO` str
 
 That means that only 4 bits represent the foreground colors and only 4 bits represent the background colors in the Windows console. 
 
-=== How could I modify the console class and/or create functions to directly interact with the console?
+==== How could I modify the console class and/or create functions to directly interact with the console?
 
 With the above information, we find that we cannot modify the console class to be able to represent the full colors the color picker would want to show, because we can not represent RGB colors with only 4 bits (we would need 24 bits, 8 for each channel). We will have to explore if other options are available to us to be able to set more colors than this method allows.
 
@@ -203,7 +213,7 @@ It might be useful to learn more about some advanced .NET programming topics lik
 
 These topics will help use be able to use the *Kernel32.dll* like above.
 
-== Virtual Terminal Sequences
+=== Virtual Terminal Sequences
 
 Does this mean we can't create a full RGB color picker display in Window's console? Maybe not!
 
@@ -212,21 +222,27 @@ The Windows Console has changed over time. The above approach that is used in `S
 [quote]
 By contrast, virtual terminal sequences (in a variety of dialects) drive the command-line environment operations for all other platforms. These sequences are rooted in an ECMA Standard and series of extensions by many vendors tracing back to Digital Equipment Corporation and Tektronix terminals, through to more modern and common software terminals, like xterm. Many extensions exist within the virtual terminal sequence domain and some sequences are more widely supported than others, but it is safe to say that the world has standardized on this as the command language for command-line experiences with a well-known subset being supported by virtually every terminal and command-line client application.
 
-There is a lot of interesting information to go through with *Virtual Terminal Sequences* that I will have to go through more in the future. But for now, one part stands out: https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#screen-colors[Screen Colors - Console Virtual Terminal Sequences | Learn Windows Console].
+There is a lot of interesting information to go through with *Virtual Terminal Sequences* that I will have to go through more in the future. But for now, these parts stand out: https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#text-formatting[Text Formatting - Console Virtual Terminal Sequences | Learn Microsoft Console] and https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences#extended-colors[Extended Colors - Console Virtual Terminal Sequences | Learn Microsoft Console]
 
-Screen colors gives us the ability to set the screen colors palette values to any RGB value! Perfect! Exactly what we are looking for to make this color picker.
+Extended colors allows us to explicitly set the foreground or background colors to any RGB value:
+[source, shell]
+----
+# Set foreground color to RGB value specified in <r>, <g>, <b>
+"\x1b[38;2;<r>;<g>;<b>m" 
 
-== Next Steps
+# Set background color to RGB value specified in <r>, <g>, <b>
+"\x1b[48;2;<r>;<g>;<b>m"
 
-Learn more about the Console API to make use of *Virtual Terminal Sequences* in C# to create our color picker.
+# Returns all attributes to the default state prior to modification
+"\x1b[0m"
+----
 
-Useful links:
-
-- https://learn.microsoft.com/en-us/windows/console/console-reference[Console Reference | Learn Windows Console]
-- https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences[Console Virtual Terminal Sequences - Using The Console API | Learn Windows Console]
-- https://learn.microsoft.com/en-us/windows/console/setconsolemode[SetConsoleMode function - API Reference | Learn Windows Console]
-- http://www.pinvoke.net/[PInvoke.net]
+By printing these sequences to the console, we are able to set the foreground and background color to any RGB value, allowing us to build the `ConsoleColorPicker`!
 
 Virtual Terminal Sequences are the next console/terminal era at Microsoft. While C# and .NET currently still (mainly) use the classic Windows Console API, parts of the new features may be partially/fully available. There will be some limitations still in place, like what console type in Windows supports virtual terminal sequences. 
 
-This project may be put on hold, as the skills and knowledge in C# required to do this are down the line from now.
+=== Conclusions
+
+The final solution to this problem was much simplier than initially thought. There is no need to modify the console class, but instead just supply specific escape sequences to update the display. Looking through the .NET runtime was still useful; it provided a better understanding of how the runtime works and how the console works, which will be useful for building more complex console apps in the future.
+
+It could be an interesting exercise in the future to implement the Virtual Terminal in the .NET runtime `Console` class to replace the Windows Console API.
